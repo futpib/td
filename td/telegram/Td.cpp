@@ -895,7 +895,13 @@ void Td::init(Parameters parameters, Result<TdDb::OpenedDatabase> r_opened_datab
       option_manager_->get_option_boolean("store_all_files_in_files_directory"));
 
   VLOG(td_init) << "Create NetQueryDispatcher";
-  auto net_query_dispatcher = make_unique<NetQueryDispatcher>([&] { return create_reference(); });
+  unique_ptr<NetQueryDispatcher> net_query_dispatcher;
+  if (td_options_.external_dispatch) {
+    net_query_dispatcher =
+        make_unique<NetQueryDispatcher>(std::move(td_options_.external_dispatch), [&] { return create_reference(); });
+  } else {
+    net_query_dispatcher = make_unique<NetQueryDispatcher>([&] { return create_reference(); });
+  }
   G()->set_net_query_dispatcher(std::move(net_query_dispatcher));
 
   complete_pending_preauthentication_requests([](int32 id) {

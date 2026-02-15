@@ -31,10 +31,14 @@ class NetQueryVerifier;
 class PublicRsaKeyWatchdog;
 class SessionMultiProxy;
 
+using ExternalDispatchCallback = std::function<void(NetQueryPtr)>;
+
 // Not just dispatcher.
 class NetQueryDispatcher {
  public:
   explicit NetQueryDispatcher(const std::function<ActorShared<>()> &create_reference);
+  NetQueryDispatcher(ExternalDispatchCallback external_dispatch,
+                     const std::function<ActorShared<>()> &create_reference);
   NetQueryDispatcher(const NetQueryDispatcher &) = delete;
   NetQueryDispatcher &operator=(const NetQueryDispatcher &) = delete;
   NetQueryDispatcher(NetQueryDispatcher &&) = delete;
@@ -59,7 +63,12 @@ class NetQueryDispatcher {
 
   void set_verification_token(int64 verification_id, string &&token, Promise<Unit> &&promise);
 
+  static void complete_net_query(NetQueryPtr net_query);
+
  private:
+  bool use_external_dispatch_ = false;
+  ExternalDispatchCallback external_dispatch_;
+
   std::atomic<bool> stop_flag_{false};
   bool need_destroy_auth_key_{false};
   ActorOwn<NetQueryDelayer> delayer_;
@@ -92,7 +101,6 @@ class NetQueryDispatcher {
   static int32 get_session_count();
   static bool get_use_pfs();
 
-  static void complete_net_query(NetQueryPtr net_query);
   bool check_stop_flag(NetQueryPtr &net_query) const;
 
   void try_fix_migrate(NetQueryPtr &net_query);

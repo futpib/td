@@ -169,6 +169,12 @@ void NetQueryDispatcher::dispatch(NetQueryPtr net_query) {
     net_query->dispatch_ttl_--;
   }
 
+  if (use_external_dispatch_) {
+    net_query->debug(PSTRING() << "sent to external dispatch dc " << dest_dc_id);
+    external_dispatch_(std::move(net_query));
+    return;
+  }
+
   auto dc_pos = static_cast<size_t>(dest_dc_id.get_raw_id() - 1);
   CHECK(dc_pos < dcs_.size());
   std::lock_guard<std::mutex> guard(mutex_);
@@ -198,6 +204,9 @@ void NetQueryDispatcher::dispatch(NetQueryPtr net_query) {
 }
 
 Status NetQueryDispatcher::wait_dc_init(DcId dc_id, bool force) {
+  if (use_external_dispatch_) {
+    return Status::OK();
+  }
   // TODO: optimize
   if (!dc_id.is_exact()) {
     return Status::Error("Not exact DC");
@@ -286,19 +295,24 @@ void NetQueryDispatcher::stop() {
   stop_flag_ = true;
   delayer_.reset();
   verifier_.reset();
-  for (auto &dc : dcs_) {
-    dc.main_session_.reset();
-    dc.upload_session_.reset();
-    dc.download_session_.reset();
-    dc.download_small_session_.reset();
+  if (!use_external_dispatch_) {
+    for (auto &dc : dcs_) {
+      dc.main_session_.reset();
+      dc.upload_session_.reset();
+      dc.download_session_.reset();
+      dc.download_small_session_.reset();
+    }
+    public_rsa_key_watchdog_.reset();
+    dc_auth_manager_.reset();
   }
-  public_rsa_key_watchdog_.reset();
-  dc_auth_manager_.reset();
   sequence_dispatcher_.reset();
   td_guard_.reset();
 }
 
 void NetQueryDispatcher::update_session_count() {
+  if (use_external_dispatch_) {
+    return;
+  }
   std::lock_guard<std::mutex> guard(mutex_);
   int32 session_count = get_session_count();
   bool use_pfs = get_use_pfs();
@@ -313,6 +327,10 @@ void NetQueryDispatcher::update_session_count() {
   }
 }
 void NetQueryDispatcher::destroy_auth_keys(Promise<> promise) {
+  if (use_external_dispatch_) {
+    promise.set_value(Unit{});
+    return;
+  }
   for (int32 i = 1; i < DcId::MAX_RAW_DC_ID && i <= 5; i++) {
     auto dc_id = DcId::internal(i);
     if (!is_dc_inited(i) && !AuthDataShared::get_auth_key_for_dc(dc_id).empty()) {
@@ -332,6 +350,9 @@ void NetQueryDispatcher::destroy_auth_keys(Promise<> promise) {
 }
 
 void NetQueryDispatcher::update_use_pfs() {
+  if (use_external_dispatch_) {
+    return;
+  }
   std::lock_guard<std::mutex> guard(mutex_);
   bool use_pfs = get_use_pfs();
   for (int32 i = 1; i < DcId::MAX_RAW_DC_ID; i++) {
@@ -345,6 +366,9 @@ void NetQueryDispatcher::update_use_pfs() {
 }
 
 void NetQueryDispatcher::update_mtproto_header() {
+  if (use_external_dispatch_) {
+    return;
+  }
   std::lock_guard<std::mutex> guard(mutex_);
   for (int32 i = 1; i < DcId::MAX_RAW_DC_ID; i++) {
     if (is_dc_inited(i)) {
@@ -380,6 +404,19 @@ NetQueryDispatcher::NetQueryDispatcher(const std::function<ActorShared<>()> &cre
   dc_auth_manager_ = create_actor_on_scheduler<DcAuthManager>("DcAuthManager", G()->get_main_session_scheduler_id(),
                                                               create_reference());
   public_rsa_key_watchdog_ = create_actor<PublicRsaKeyWatchdog>("PublicRsaKeyWatchdog", create_reference());
+  sequence_dispatcher_ = MultiSequenceDispatcher::create("MultiSequenceDispatcher");
+
+  td_guard_ = create_shared_lambda_guard([actor = create_reference()] {});
+}
+
+NetQueryDispatcher::NetQueryDispatcher(ExternalDispatchCallback external_dispatch,
+                                       const std::function<ActorShared<>()> &create_reference)
+    : use_external_dispatch_(true), external_dispatch_(std::move(external_dispatch)) {
+  auto s_main_dc_id = G()->td_db()->get_binlog_pmc()->get("main_dc_id");
+  if (!s_main_dc_id.empty()) {
+    main_dc_id_ = to_integer<int32>(s_main_dc_id);
+  }
+  delayer_ = create_actor<NetQueryDelayer>("NetQueryDelayer", create_reference());
   sequence_dispatcher_ = MultiSequenceDispatcher::create("MultiSequenceDispatcher");
 
   td_guard_ = create_shared_lambda_guard([actor = create_reference()] {});
@@ -434,6 +471,9 @@ void NetQueryDispatcher::set_main_dc_id(int32 new_main_dc_id) {
 }
 
 void NetQueryDispatcher::check_authorization_is_ok() {
+  if (use_external_dispatch_) {
+    return;
+  }
   std::lock_guard<std::mutex> guard(mutex_);
   if (stop_flag_.load(std::memory_order_relaxed)) {
     return;

@@ -8,6 +8,7 @@
 
 #include "td/telegram/net/MtprotoHeader.h"
 #include "td/telegram/net/NetQuery.h"
+#include "td/telegram/net/NetQueryDispatcher.h"
 #include "td/telegram/net/NetQueryStats.h"
 #include "td/telegram/td_api.h"
 #include "td/telegram/TdCallback.h"
@@ -136,6 +137,7 @@ class Td final : public Actor {
 
   struct Options {
     std::shared_ptr<NetQueryStats> net_query_stats;
+    ExternalDispatchCallback external_dispatch;
   };
 
   Td(unique_ptr<TdCallback> callback, Options options);

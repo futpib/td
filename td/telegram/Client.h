@@ -8,13 +8,12 @@
 
 ///\file
 
+#include "td/telegram/net/NetQueryDispatcher.h"
 #include "td/telegram/td_api.h"
 #include "td/telegram/td_api.hpp"
 
 #include <cstdint>
 #include <memory>
-
-namespace td {
 
 /**
  * The native C++ interface for interaction with TDLib.
@@ -164,6 +163,15 @@ class ClientManager final {
    * \return A unique singleton ClientManager instance.
    */
   static ClientManager *get_manager_singleton();
+
+  /**
+   * Sets a global external dispatch callback.
+   * When set, all newly created TDLib instances will route their network queries
+   * through this callback instead of maintaining their own MTProto connections.
+   * Must be called before creating any client instances.
+   * \param[in] callback The external dispatch callback, or nullptr to disable.
+   */
+  static void set_external_dispatch(ExternalDispatchCallback callback);
 
  private:
   friend class Client;

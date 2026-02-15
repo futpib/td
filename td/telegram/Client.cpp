@@ -37,6 +37,19 @@
 
 namespace td {
 
+static ExternalDispatchCallback global_external_dispatch_;
+static std::mutex global_external_dispatch_mutex_;
+
+void ClientManager::set_external_dispatch(ExternalDispatchCallback callback) {
+  std::lock_guard<std::mutex> lock(global_external_dispatch_mutex_);
+  global_external_dispatch_ = std::move(callback);
+}
+
+static ExternalDispatchCallback get_global_external_dispatch() {
+  std::lock_guard<std::mutex> lock(global_external_dispatch_mutex_);
+  return global_external_dispatch_;
+}
+
 #if TD_THREAD_UNSUPPORTED || TD_EVENTFD_UNSUPPORTED
 class TdReceiver {
  public:
@@ -98,6 +111,7 @@ class ClientManager::Impl final {
         CHECK(concurrent_scheduler_ == nullptr);
         CHECK(options_.net_query_stats == nullptr);
         options_.net_query_stats = std::make_shared<NetQueryStats>();
+        options_.external_dispatch = get_global_external_dispatch();
         concurrent_scheduler_ = make_unique<ConcurrentScheduler>(0, 0);
         concurrent_scheduler_->start();
       }
@@ -360,6 +374,7 @@ class MultiImpl {
       auto guard = concurrent_scheduler_->get_main_guard();
       Td::Options options;
       options.net_query_stats = std::move(net_query_stats);
+      options.external_dispatch = get_global_external_dispatch();
       multi_td_ = create_actor<MultiTd>("MultiTd", std::move(options));
     }
 
