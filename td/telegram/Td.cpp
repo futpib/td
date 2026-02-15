@@ -898,7 +898,7 @@ void Td::init(Parameters parameters, Result<TdDb::OpenedDatabase> r_opened_datab
   unique_ptr<NetQueryDispatcher> net_query_dispatcher;
   if (td_options_.external_dispatch) {
     net_query_dispatcher =
-        make_unique<NetQueryDispatcher>(std::move(td_options_.external_dispatch), [&] { return create_reference(); });
+        td::make_unique<NetQueryDispatcher>(std::move(td_options_.external_dispatch), [&] { return create_reference(); });
   } else {
     net_query_dispatcher = make_unique<NetQueryDispatcher>([&] { return create_reference(); });
   }

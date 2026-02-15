@@ -5,6 +5,7 @@
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 #include "td/telegram/Client.h"
+#include "td/telegram/net/NetQueryDispatcher.h"
 
 #include "td/telegram/Td.h"
 #include "td/telegram/TdCallback.h"
@@ -40,7 +41,7 @@ namespace td {
 static ExternalDispatchCallback global_external_dispatch_;
 static std::mutex global_external_dispatch_mutex_;
 
-void ClientManager::set_external_dispatch(ExternalDispatchCallback callback) {
+void set_external_dispatch(ExternalDispatchCallback callback) {
   std::lock_guard<std::mutex> lock(global_external_dispatch_mutex_);
   global_external_dispatch_ = std::move(callback);
 }
