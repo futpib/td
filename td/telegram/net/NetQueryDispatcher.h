@@ -65,6 +65,10 @@ class NetQueryDispatcher {
 
   static void complete_net_query(NetQueryPtr net_query);
 
+  bool use_external_dispatch() const {
+    return use_external_dispatch_;
+  }
+
  private:
   bool use_external_dispatch_ = false;
   ExternalDispatchCallback external_dispatch_;

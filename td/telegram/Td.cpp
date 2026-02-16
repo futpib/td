@@ -910,6 +910,16 @@ void Td::init(Parameters parameters, Result<TdDb::OpenedDatabase> r_opened_datab
   });
 
   VLOG(td_init) << "Create AuthManager";
+  if (G()->net_query_dispatcher().use_external_dispatch()) {
+    // When using external dispatch, the MTP session is already
+    // authenticated by the host application. Pre-seed the auth
+    // state so AuthManager considers itself authorized and fetches
+    // user info via the external dispatch path.
+    auto auth_str = G()->td_db()->get_binlog_pmc()->get("auth");
+    if (auth_str.empty()) {
+      G()->td_db()->get_binlog_pmc()->set("auth", "ok");
+    }
+  }
   auth_manager_ = td::make_unique<AuthManager>(parameters.api_id_, parameters.api_hash_, create_reference());
   auth_manager_actor_ = register_actor("AuthManager", auth_manager_.get());
   G()->set_auth_manager(auth_manager_actor_.get());

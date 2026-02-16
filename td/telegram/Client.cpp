@@ -5,6 +5,7 @@
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 #include "td/telegram/Client.h"
+#include "td/telegram/ClientInternal.h"
 #include "td/telegram/net/NetQueryDispatcher.h"
 
 #include "td/telegram/Td.h"
@@ -38,15 +39,15 @@
 
 namespace td {
 
-static ExternalDispatchCallback global_external_dispatch_;
+static GlobalExternalDispatchCallback global_external_dispatch_;
 static std::mutex global_external_dispatch_mutex_;
 
-void set_external_dispatch(ExternalDispatchCallback callback) {
+void set_external_dispatch(GlobalExternalDispatchCallback callback) {
   std::lock_guard<std::mutex> lock(global_external_dispatch_mutex_);
   global_external_dispatch_ = std::move(callback);
 }
 
-static ExternalDispatchCallback get_global_external_dispatch() {
+static GlobalExternalDispatchCallback get_global_external_dispatch() {
   std::lock_guard<std::mutex> lock(global_external_dispatch_mutex_);
   return global_external_dispatch_;
 }
@@ -112,12 +113,20 @@ class ClientManager::Impl final {
         CHECK(concurrent_scheduler_ == nullptr);
         CHECK(options_.net_query_stats == nullptr);
         options_.net_query_stats = std::make_shared<NetQueryStats>();
-        options_.external_dispatch = get_global_external_dispatch();
+        global_dispatch_ = get_global_external_dispatch();
         concurrent_scheduler_ = make_unique<ConcurrentScheduler>(0, 0);
         concurrent_scheduler_->start();
       }
+      auto options = options_;
+      if (global_dispatch_) {
+        auto dispatch = global_dispatch_;
+        auto id = client_id;
+        options.external_dispatch = [dispatch, id](NetQueryPtr query) {
+          dispatch(id, std::move(query));
+        };
+      }
       tds_[client_id] =
-          concurrent_scheduler_->create_actor_unsafe<Td>(0, "Td", receiver_.create_callback(client_id), options_);
+          concurrent_scheduler_->create_actor_unsafe<Td>(0, "Td", receiver_.create_callback(client_id), options);
     }
     requests_.push_back({client_id, request_id, std::move(request)});
   }
@@ -221,6 +230,7 @@ class ClientManager::Impl final {
   unique_ptr<ConcurrentScheduler> concurrent_scheduler_;
   ClientId client_id_{0};
   Td::Options options_;
+  GlobalExternalDispatchCallback global_dispatch_;
   FlatHashSet<int32> pending_clients_;
   FlatHashMap<int32, ActorOwn<Td>> tds_;
 };
@@ -252,17 +262,28 @@ class Client::Impl final {
 
 class MultiTd final : public Actor {
  public:
-  explicit MultiTd(Td::Options options) : options_(std::move(options)) {
+  MultiTd(Td::Options options, GlobalExternalDispatchCallback global_dispatch)
+      : options_(std::move(options)), global_dispatch_(std::move(global_dispatch)) {
+    options_.external_dispatch = {};
   }
   void create(int32 td_id, unique_ptr<TdCallback> callback) {
     auto &td = tds_[td_id];
     CHECK(td.empty());
 
+    auto options = options_;
+    if (global_dispatch_) {
+      auto dispatch = global_dispatch_;
+      auto id = td_id;
+      options.external_dispatch = [dispatch, id](NetQueryPtr query) {
+        dispatch(id, std::move(query));
+      };
+    }
+
     string name = "Td";
     auto context = std::make_shared<ActorContext>();
     auto old_context = set_context(context);
     auto old_tag = set_tag(to_string(td_id));
-    td = create_actor<Td>("Td", std::move(callback), options_);
+    td = create_actor<Td>("Td", std::move(callback), options);
     set_context(std::move(old_context));
     set_tag(std::move(old_tag));
   }
@@ -279,8 +300,22 @@ class MultiTd final : public Actor {
     CHECK(erased_count > 0);
   }
 
+  void complete_query(int32 td_id, NetQueryPtr query) {
+    auto it = tds_.find(td_id);
+    if (it == tds_.end()) {
+      return;
+    }
+    auto callback = query->move_callback();
+    if (callback.empty()) {
+      send_closure(it->second, &Td::on_result, std::move(query));
+    } else {
+      send_closure_later(std::move(callback), &NetQueryCallback::on_result, std::move(query));
+    }
+  }
+
  private:
   Td::Options options_;
+  GlobalExternalDispatchCallback global_dispatch_;
   FlatHashMap<int32, ActorOwn<Td>> tds_;
 };
 
@@ -375,8 +410,8 @@ class MultiImpl {
       auto guard = concurrent_scheduler_->get_main_guard();
       Td::Options options;
       options.net_query_stats = std::move(net_query_stats);
-      options.external_dispatch = get_global_external_dispatch();
-      multi_td_ = create_actor<MultiTd>("MultiTd", std::move(options));
+      auto global_dispatch = get_global_external_dispatch();
+      multi_td_ = create_actor<MultiTd>("MultiTd", std::move(options), std::move(global_dispatch));
     }
 
     scheduler_thread_ = thread([concurrent_scheduler = concurrent_scheduler_] {
@@ -417,6 +452,30 @@ class MultiImpl {
     send_closure(multi_td_, &MultiTd::close, client_id);
   }
 
+  void complete_query(int32 client_id, NetQueryPtr query) {
+    auto guard = concurrent_scheduler_->get_send_guard();
+    send_closure(multi_td_, &MultiTd::complete_query, client_id, std::move(query));
+  }
+
+  static void register_client(int32 client_id, std::shared_ptr<MultiImpl> impl) {
+    std::lock_guard<std::mutex> lock(clients_mutex_);
+    clients_[client_id] = std::move(impl);
+  }
+
+  static void unregister_client(int32 client_id) {
+    std::lock_guard<std::mutex> lock(clients_mutex_);
+    clients_.erase(client_id);
+  }
+
+  static std::shared_ptr<MultiImpl> get_client_impl(int32 client_id) {
+    std::lock_guard<std::mutex> lock(clients_mutex_);
+    auto it = clients_.find(client_id);
+    if (it == clients_.end()) {
+      return nullptr;
+    }
+    return it->second.lock();
+  }
+
   ~MultiImpl() {
     {
       auto guard = concurrent_scheduler_->get_send_guard();
@@ -437,9 +496,13 @@ class MultiImpl {
   ActorOwn<MultiTd> multi_td_;
 
   static std::atomic<uint32> current_id_;
+  static std::mutex clients_mutex_;
+  static FlatHashMap<int32, std::weak_ptr<MultiImpl>> clients_;
 };
 
 std::atomic<uint32> MultiImpl::current_id_{1};
+std::mutex MultiImpl::clients_mutex_;
+FlatHashMap<int32, std::weak_ptr<MultiImpl>> MultiImpl::clients_;
 
 class MultiImplPool {
  public:
@@ -520,6 +583,7 @@ class ClientManager::Impl final {
       if (it != impls_.end() && it->second.impl == nullptr) {
         it->second.impl = pool_.get();
         it->second.impl->create(client_id, receiver_.create_callback(client_id));
+        MultiImpl::register_client(client_id, it->second.impl);
       }
       write_lock.reset();
 
@@ -569,6 +633,7 @@ class ClientManager::Impl final {
     CHECK(it != impls_.end());
     if (!it->second.is_closed) {
       it->second.is_closed = true;
+      MultiImpl::unregister_client(client_id);
       if (it->second.impl == nullptr) {
         receiver_.add_response(client_id, 0, nullptr);
       } else {
@@ -656,6 +721,22 @@ class Client::Impl final {
   int32 td_id_;
 };
 #endif
+
+void complete_external_query(int32 client_id, NetQueryPtr query) {
+#if TD_THREAD_UNSUPPORTED || TD_EVENTFD_UNSUPPORTED
+  NetQueryDispatcher::complete_net_query(std::move(query));
+#else
+  // We may be called from outside TDLib's scheduler threads (e.g. Qt main
+  // thread), so we cannot use G() or send_closure_later directly.
+  // Use the MultiImpl's ConcurrentScheduler send guard to safely dispatch.
+  auto impl = MultiImpl::get_client_impl(client_id);
+  if (impl) {
+    impl->complete_query(client_id, std::move(query));
+  } else {
+    LOG(ERROR) << "No MultiImpl found for client " << client_id << ", dropping query";
+  }
+#endif
+}
 
 Client::Client() : impl_(std::make_unique<Impl>()) {
 }
