@@ -4,16 +4,12 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-#pragma once
+#include "tl_json_converter.h"
 
 #include "td/tl/tl_config.h"
-#include "td/tl/tl_writer.h"
+#include "td/tl/tl_generate.h"
 
-#include <string>
-
-namespace td {
-
-void gen_json_converter(const tl::tl_config &config, const std::string &file_name, const std::string &api_name,
-                        tl::TL_writer::Mode mode, int source_file_count);
-
-}  // namespace td
+int main() {
+  td::gen_json_converter(td::tl::read_tl_config_from_file("tlo/telegram_api.tlo"), "td/telegram/telegram_api_json",
+                         "telegram_api", td::tl::TL_writer::All, 10);
+}

@@ -161,7 +161,7 @@ if (NOT CMAKE_CROSSCOMPILING)
   if (TD_GENERATE_SOURCE_FILES)
     set(TD_ALWAYS_GENERATE_SOURCE "ALL")
   endif()
-  add_custom_target(prepare_cross_compiling ${TD_ALWAYS_GENERATE_SOURCE} DEPENDS tl_generate_mtproto tl_generate_common tdmime_auto tl_generate_json)
+  add_custom_target(prepare_cross_compiling ${TD_ALWAYS_GENERATE_SOURCE} DEPENDS tl_generate_mtproto tl_generate_common tdmime_auto tl_generate_json tl_generate_telegram_api_json)
   if (TD_ENABLE_DOTNET)
     add_dependencies(prepare_cross_compiling generate_dotnet_api)
   endif()
@@ -238,6 +238,7 @@ endif()
 get_directory_property(HAS_PARENT PARENT_DIRECTORY)
 if (HAS_PARENT)
   set(TL_TD_JSON_AUTO ${TL_TD_JSON_AUTO_SOURCE} PARENT_SCOPE) # used in tdbot
+  set(TL_TELEGRAM_API_JSON_AUTO ${TL_TELEGRAM_API_JSON_AUTO_SOURCE} PARENT_SCOPE)
   set(TD_TEST_SOURCE ${TD_TEST_SOURCE} PARENT_SCOPE) # used to build tests
 endif()
 
@@ -267,6 +268,12 @@ set_source_files_properties(${TL_TD_AUTO_SOURCE} PROPERTIES GENERATED TRUE)
 set_source_files_properties(${TL_TD_JSON_AUTO_SOURCE} PROPERTIES GENERATED TRUE)
 set(TL_TD_JSON_SOURCE
   ${TL_TD_JSON_AUTO_SOURCE}
+  td/tl/tl_json.h
+)
+
+set_source_files_properties(${TL_TELEGRAM_API_JSON_AUTO_SOURCE} PROPERTIES GENERATED TRUE)
+set(TL_TELEGRAM_API_JSON_SOURCE
+  ${TL_TELEGRAM_API_JSON_AUTO_SOURCE}
   td/tl/tl_json.h
 )
 

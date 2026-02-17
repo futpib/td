@@ -78,6 +78,21 @@ set(TL_TD_JSON_AUTO_SOURCE
   PARENT_SCOPE
 )
 
+set(TL_TELEGRAM_API_JSON_AUTO_SOURCE
+  ${TD_AUTO_INCLUDE_DIR}/telegram/telegram_api_json_0.cpp
+  ${TD_AUTO_INCLUDE_DIR}/telegram/telegram_api_json_1.cpp
+  ${TD_AUTO_INCLUDE_DIR}/telegram/telegram_api_json_2.cpp
+  ${TD_AUTO_INCLUDE_DIR}/telegram/telegram_api_json_3.cpp
+  ${TD_AUTO_INCLUDE_DIR}/telegram/telegram_api_json_4.cpp
+  ${TD_AUTO_INCLUDE_DIR}/telegram/telegram_api_json_5.cpp
+  ${TD_AUTO_INCLUDE_DIR}/telegram/telegram_api_json_6.cpp
+  ${TD_AUTO_INCLUDE_DIR}/telegram/telegram_api_json_7.cpp
+  ${TD_AUTO_INCLUDE_DIR}/telegram/telegram_api_json_8.cpp
+  ${TD_AUTO_INCLUDE_DIR}/telegram/telegram_api_json_9.cpp
+  ${TD_AUTO_INCLUDE_DIR}/telegram/telegram_api_json.h
+  PARENT_SCOPE
+)
+
 set(TL_C_AUTO_SOURCE
   ${TD_AUTO_INCLUDE_DIR}/telegram/td_tdc_api.cpp
   ${TD_AUTO_INCLUDE_DIR}/telegram/td_tdc_api.h
@@ -131,6 +146,14 @@ set(TL_GENERATE_JAVA_SOURCE
 
 set(TL_GENERATE_JSON_SOURCE
   generate_json.cpp
+
+  tl_json_converter.cpp
+
+  tl_json_converter.h
+)
+
+set(TL_GENERATE_TELEGRAM_API_JSON_SOURCE
+  generate_telegram_api_json.cpp
 
   tl_json_converter.cpp
 
@@ -225,6 +248,15 @@ if (NOT CMAKE_CROSSCOMPILING)
     COMMAND generate_json
     COMMENT "Generate JSON TL source files"
     DEPENDS generate_json tl_generate_tlo ${TD_API_TLO_FILE} ${CMAKE_CURRENT_SOURCE_DIR}/scheme/td_api.tl
+  )
+
+  add_executable(generate_telegram_api_json ${TL_GENERATE_TELEGRAM_API_JSON_SOURCE})
+  target_link_libraries(generate_telegram_api_json PRIVATE tdtl tdutils)
+  add_custom_target(tl_generate_telegram_api_json
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/auto
+    COMMAND generate_telegram_api_json
+    COMMENT "Generate telegram_api JSON TL source files"
+    DEPENDS generate_telegram_api_json tl_generate_tlo ${TLO_FILES}
   )
 
   if (TD_ENABLE_JNI)

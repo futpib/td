@@ -9,6 +9,7 @@
 #include "td/tl/TlObject.h"
 
 #include "td/utils/base64.h"
+#include "td/utils/buffer.h"
 #include "td/utils/common.h"
 #include "td/utils/format.h"
 #include "td/utils/JsonBuilder.h"
@@ -17,10 +18,32 @@
 #include "td/utils/SliceBuilder.h"
 #include "td/utils/Status.h"
 #include "td/utils/TlDowncastHelper.h"
+#include "td/utils/UInt.h"
 
 #include <type_traits>
 
 namespace td {
+
+template <size_t size>
+inline string base64_encode(const UInt<size> &value) {
+  return base64_encode(value.as_slice());
+}
+
+template <size_t size>
+inline Status from_json_bytes(UInt<size> &to, JsonValue from) {
+  if (from.type() != JsonValue::Type::String) {
+    if (from.type() == JsonValue::Type::Null) {
+      return Status::OK();
+    }
+    return Status::Error(PSLICE() << "Expected String, but receive " << from.type());
+  }
+  TRY_RESULT(decoded, base64_decode(from.get_string()));
+  if (decoded.size() != size / 8) {
+    return Status::Error(PSLICE() << "Expected " << size / 8 << " bytes, but got " << decoded.size());
+  }
+  to.as_mutable_slice().copy_from(decoded);
+  return Status::OK();
+}
 
 struct JsonInt64 {
   int64 value;
@@ -38,6 +61,19 @@ inline void to_json(JsonValueScope &jv, const JsonVectorInt64 &vec) {
   auto ja = jv.enter_array();
   for (auto &value : vec.value) {
     ja.enter_value() << ToJson(JsonInt64{value});
+  }
+}
+
+template <class T>
+struct JsonVectorBytes {
+  const vector<T> &value;
+};
+
+template <class T>
+inline void to_json(JsonValueScope &jv, const JsonVectorBytes<T> &vec) {
+  auto ja = jv.enter_array();
+  for (auto &value : vec.value) {
+    ja.enter_value() << JsonString(base64_encode(Slice(value)));
   }
 }
 
@@ -145,6 +181,34 @@ Status from_json(vector<T> &to, JsonValue from) {
   size_t i = 0;
   for (auto &value : from.get_array()) {
     TRY_STATUS(from_json(to[i], std::move(value)));
+    i++;
+  }
+  return Status::OK();
+}
+
+inline Status from_json_bytes(BufferSlice &to, JsonValue from) {
+  if (from.type() != JsonValue::Type::String) {
+    if (from.type() == JsonValue::Type::Null) {
+      return Status::OK();
+    }
+    return Status::Error(PSLICE() << "Expected String, but receive " << from.type());
+  }
+  TRY_RESULT(decoded, base64_decode(from.get_string()));
+  to = BufferSlice(decoded);
+  return Status::OK();
+}
+
+inline Status from_json_bytes(vector<BufferSlice> &to, JsonValue from) {
+  if (from.type() != JsonValue::Type::Array) {
+    if (from.type() == JsonValue::Type::Null) {
+      return Status::OK();
+    }
+    return Status::Error(PSLICE() << "Expected Array, but receive " << from.type());
+  }
+  to = vector<BufferSlice>(from.get_array().size());
+  size_t i = 0;
+  for (auto &value : from.get_array()) {
+    TRY_STATUS(from_json_bytes(to[i], std::move(value)));
     i++;
   }
   return Status::OK();

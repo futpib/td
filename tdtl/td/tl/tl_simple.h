@@ -39,7 +39,7 @@ inline std::string gen_cpp_field_name(std::string name) {
 
 struct CustomType;
 struct Type {
-  enum { Int32, Int53, Int64, Double, String, Bytes, Vector, Bool, Custom } type;
+  enum { Int32, Int53, Int64, Double, String, Bytes, Vector, Bool, Custom, SecureString, SecureBytes, Int128, Int256, Int512 } type;
 
   // type == Custom
   bool is_bare{false};
@@ -93,6 +93,11 @@ class Schema {
     for (std::size_t function_num = 0, function_count = config.get_function_count(); function_num < function_count;
          function_num++) {
       auto *from_function = config.get_function_by_num(function_num);
+      // Skip polymorphic functions that return a type variable (type_id == 0),
+      // e.g. invokeAfterMsg {X:Type} ... = X in telegram_api.
+      if (from_function->type_id == 0) {
+        continue;
+      }
       functions.push_back(get_function(from_function));
     }
     for (auto &function : functions_) {
@@ -162,11 +167,11 @@ class Schema {
       types_.push_back(std::make_unique<Type>());
       type = types_.back().get();
 
-      if (from_type->name == "Int32") {
+      if (from_type->name == "#" || from_type->name == "Int" || from_type->name == "Int32") {
         type->type = Type::Int32;
       } else if (from_type->name == "Int53") {
         type->type = Type::Int53;
-      } else if (from_type->name == "Int64") {
+      } else if (from_type->name == "Long" || from_type->name == "Int64") {
         type->type = Type::Int64;
       } else if (from_type->name == "Double") {
         type->type = Type::Double;
@@ -174,10 +179,20 @@ class Schema {
         type->type = Type::String;
       } else if (from_type->name == "Bytes") {
         type->type = Type::Bytes;
-      } else if (from_type->name == "Bool") {
+      } else if (from_type->name == "True" || from_type->name == "Bool") {
         type->type = Type::Bool;
+      } else if (from_type->name == "SecureString") {
+        type->type = Type::SecureString;
+      } else if (from_type->name == "SecureBytes") {
+        type->type = Type::SecureBytes;
+      } else if (from_type->name == "Int128") {
+        type->type = Type::Int128;
+      } else if (from_type->name == "Int256") {
+        type->type = Type::Int256;
+      } else if (from_type->name == "Int512") {
+        type->type = Type::Int512;
       } else if (from_type->name == "Vector") {
-        assert(false);  // unreachable
+        assert(false);  // unreachable — Vector types handled via get_type(tl_tree*)
       } else {
         type->type = Type::Custom;
         custom_types_.push_back(std::make_unique<CustomType>());
@@ -223,7 +238,7 @@ class Schema {
       function = functions_.back().get();
       function->id = from->id;
       function->name = from->name;
-      function->type = get_type(config_->get_type(from->type_id));
+      function->type = get_type(from->result);
       for (auto &from_arg : from->args) {
         Arg arg;
         arg.name = from_arg.name;

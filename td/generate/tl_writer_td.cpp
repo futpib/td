@@ -51,7 +51,8 @@ bool TD_TL_writer::is_combinator_supported(const tl::tl_combinator *constructor)
 
 bool TD_TL_writer::is_default_constructor_generated(const tl::tl_combinator *t, bool can_be_parsed,
                                                     bool can_be_stored) const {
-  return tl_name == "td_api" || tl_name == "TdApi" || (t->var_count > 0 && can_be_parsed) || t->name == "updates";
+  return tl_name == "td_api" || tl_name == "TdApi" || tl_name == "telegram_api" ||
+         (t->var_count > 0 && can_be_parsed) || t->name == "updates";
 }
 
 bool TD_TL_writer::is_full_constructor_generated(const tl::tl_combinator *t, bool can_be_parsed,
