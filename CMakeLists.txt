@@ -503,6 +503,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/MessageContent.cpp
   td/telegram/MessageContentType.cpp
   td/telegram/MessageCopyOptions.cpp
+  td/telegram/MessageCover.cpp
   td/telegram/MessageDb.cpp
   td/telegram/MessageEntity.cpp
   td/telegram/MessageExtendedMedia.cpp
@@ -547,6 +548,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/net/NetQueryVerifier.cpp
   td/telegram/net/NetStatsManager.cpp
   td/telegram/net/Proxy.cpp
+  td/telegram/net/ProxyChecker.cpp
   td/telegram/net/PublicRsaKeySharedCdn.cpp
   td/telegram/net/PublicRsaKeySharedMain.cpp
   td/telegram/net/PublicRsaKeyWatchdog.cpp
@@ -886,6 +888,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/MessageContent.h
   td/telegram/MessageContentType.h
   td/telegram/MessageCopyOptions.h
+  td/telegram/MessageCover.h
   td/telegram/MessageDb.h
   td/telegram/MessageEffectId.h
   td/telegram/MessageEntity.h
@@ -938,6 +941,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/net/NetStatsManager.h
   td/telegram/net/NetType.h
   td/telegram/net/Proxy.h
+  td/telegram/net/ProxyChecker.h
   td/telegram/net/PublicRsaKeySharedCdn.h
   td/telegram/net/PublicRsaKeySharedMain.h
   td/telegram/net/PublicRsaKeyWatchdog.h
