@@ -12,70 +12,8 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - name: Checkout fork
-        uses: actions/checkout@v4
+      - uses: tgymnich/fork-sync@e905b254d56ebb367514cd05fa96bf7516bd2a5a # v2.0.10
         with:
-          ref: master
-          fetch-depth: 0
-
-      - name: Add upstream remote
-        run: git remote add upstream https://github.com/tdlib/td.git
-
-      - name: Fetch upstream
-        run: git fetch upstream master
-
-      - name: Attempt merge
-        id: merge
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git merge upstream/master --no-edit; then
-            if [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]; then
-              echo "result=noop" >> "$GITHUB_OUTPUT"
-            else
-              echo "result=success" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            git merge --abort
-            echo "result=conflict" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Push merged changes
-        if: steps.merge.outputs.result == 'success'
-        run: git push origin master
-
-      - name: Create conflict resolution branch and PR
-        if: steps.merge.outputs.result == 'conflict'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          existing=$(gh pr list --label "upstream-sync" --state open --json number --jq 'length')
-          if [ "$existing" != "0" ]; then
-            echo "Upstream sync PR already exists, skipping."
-            exit 0
-          fi
-
-          branch="upstream-sync/$(date +%Y-%m-%d)"
-          git checkout -b "$branch"
-          git merge upstream/master --no-edit || true
-          git add -A
-          git commit --no-edit -m "WIP: merge upstream/master (has conflicts)"
-          git push origin "$branch"
-
-          gh pr create \
-            --base master \
-            --head "$branch" \
-            --title "Upstream sync conflict ($(date +%Y-%m-%d))" \
-            --label "upstream-sync" \
-            --body "Automatic merge of \`upstream/master\` into \`master\` failed due to conflicts.
-
-          The conflict markers are committed on this branch. To resolve:
-          \`\`\`
-          git fetch origin $branch
-          git checkout $branch
-          git reset HEAD~1
-          git checkout master
-          git merge upstream/master
-          # fix conflicts
-          git push origin master
-          \`\`\`"
+          owner: tdlib
+          base: master
+          head: master
