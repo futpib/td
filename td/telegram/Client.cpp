@@ -53,6 +53,92 @@ static GlobalExternalDispatchCallback get_global_external_dispatch() {
   return global_external_dispatch_;
 }
 
+// Externally-dispatched NetQueries are stashed here, on the scheduler thread
+// that dispatched them, and never handed to the embedder.  The embedder only
+// learns the id; completion looks the query back up on a scheduler thread.
+//
+// We also remember which scheduler dispatched the query.  NetQueryDispatcher::
+// dispatch() runs synchronously on the originating actor's scheduler, so the
+// query's cancel_slot (and usually its callback) actor live on that scheduler.
+// The completion must run there too: NetQuery::start_migrate migrates the
+// cancel_slot, and delivering the finished query from any other scheduler would
+// migrate that actor as if it lived on the completing scheduler, underflowing
+// Scheduler::actor_count_.
+static std::mutex external_queries_mutex_;
+struct StashedExternalQuery {
+  int32 sched_id = 0;
+  NetQueryPtr query;
+};
+static FlatHashMap<uint64, StashedExternalQuery> external_queries_;
+static uint64 external_queries_next_id_ = 1;
+
+static ExternalQuery stash_external_query(NetQueryPtr query) {
+  ExternalQuery data;
+  data.query = query->query().as_slice().str();
+  data.gzip = (query->gzip_flag() == NetQuery::GzipFlag::On);
+  data.raw_dc_id = query->dc_id().is_main() ? 0 : query->dc_id().get_raw_id();
+  data.type = static_cast<int32>(query->type());
+  std::lock_guard<std::mutex> lock(external_queries_mutex_);
+  data.id = external_queries_next_id_++;
+  auto &slot = external_queries_[data.id];
+  slot.sched_id = Scheduler::instance()->sched_id();
+  slot.query = std::move(query);
+  return data;
+}
+
+static NetQueryPtr take_external_query(uint64 id) {
+  std::lock_guard<std::mutex> lock(external_queries_mutex_);
+  auto it = external_queries_.find(id);
+  if (it == external_queries_.end()) {
+    return {};
+  }
+  auto query = std::move(it->second.query);
+  external_queries_.erase(it);
+  return query;
+}
+
+static int32 external_query_sched(uint64 id) {
+  std::lock_guard<std::mutex> lock(external_queries_mutex_);
+  auto it = external_queries_.find(id);
+  return (it == external_queries_.end()) ? -1 : it->second.sched_id;
+}
+
+namespace {
+// Finishes an externally-dispatched query on the scheduler that dispatched it
+// (created there via create_actor_on_scheduler).  Takes the stashed NetQuery,
+// applies the result and delivers it to its callback -- all on that scheduler,
+// where the query's actors live, so no cross-scheduler migration is forced.
+class ExternalCompletionActor final : public Actor {
+ public:
+  ExternalCompletionActor(uint64 query_id, ActorId<Td> td, ExternalQueryResult result)
+      : query_id_(query_id), td_(td), result_(std::move(result)) {
+  }
+
+ private:
+  uint64 query_id_;
+  ActorId<Td> td_;
+  ExternalQueryResult result_;
+
+  void start_up() final {
+    auto query = take_external_query(query_id_);
+    if (!query.empty()) {
+      if (result_.is_ok) {
+        query->set_ok(BufferSlice(Slice(result_.ok_data.data(), result_.ok_data.size())));
+      } else {
+        query->set_error(Status::Error(result_.error_code, result_.error_message));
+      }
+      auto callback = query->move_callback();
+      if (callback.empty()) {
+        send_closure_later(td_, &Td::on_result, std::move(query));
+      } else {
+        send_closure_later(std::move(callback), &NetQueryCallback::on_result, std::move(query));
+      }
+    }
+    stop();
+  }
+};
+}  // namespace
+
 #if TD_THREAD_UNSUPPORTED || TD_EVENTFD_UNSUPPORTED
 class TdReceiver {
  public:
@@ -123,7 +209,7 @@ class ClientManager::Impl final {
         auto dispatch = global_dispatch_;
         auto id = client_id;
         options.external_dispatch = [dispatch, id](NetQueryPtr query) {
-          dispatch(id, std::move(query));
+          dispatch(id, stash_external_query(std::move(query)));
         };
       }
       tds_[client_id] =
@@ -276,7 +362,7 @@ class MultiTd final : public Actor {
       auto dispatch = global_dispatch_;
       auto id = td_id;
       options.external_dispatch = [dispatch, id](NetQueryPtr query) {
-        dispatch(id, std::move(query));
+        dispatch(id, stash_external_query(std::move(query)));
       };
     }
 
@@ -301,17 +387,19 @@ class MultiTd final : public Actor {
     CHECK(erased_count > 0);
   }
 
-  void complete_query(int32 td_id, NetQueryPtr query) {
-    auto it = tds_.find(td_id);
-    if (it == tds_.end()) {
+  void complete_external(int32 td_id, uint64 query_id, ExternalQueryResult result) {
+    // Route the completion to the scheduler that dispatched the query, where its
+    // cancel_slot/callback actors live.  Finishing it on this scheduler instead
+    // would migrate those actors as if from here and underflow actor_count_.
+    auto sched_id = external_query_sched(query_id);
+    if (sched_id < 0) {
       return;
     }
-    auto callback = query->move_callback();
-    if (callback.empty()) {
-      send_closure(it->second, &Td::on_result, std::move(query));
-    } else {
-      send_closure_later(std::move(callback), &NetQueryCallback::on_result, std::move(query));
-    }
+    auto it = tds_.find(td_id);
+    auto td = (it != tds_.end()) ? it->second.get() : ActorId<Td>();
+    create_actor_on_scheduler<ExternalCompletionActor>(
+        "ExternalCompletion", sched_id, query_id, td, std::move(result))
+        .release();
   }
 
  private:
@@ -453,9 +541,9 @@ class MultiImpl {
     send_closure(multi_td_, &MultiTd::close, client_id);
   }
 
-  void complete_query(int32 client_id, NetQueryPtr query) {
+  void complete_query(int32 client_id, uint64 query_id, ExternalQueryResult result) {
     auto guard = concurrent_scheduler_->get_send_guard();
-    send_closure(multi_td_, &MultiTd::complete_query, client_id, std::move(query));
+    send_closure(multi_td_, &MultiTd::complete_external, client_id, query_id, std::move(result));
   }
 
   static void register_client(int32 client_id, std::shared_ptr<MultiImpl> impl) {
@@ -723,18 +811,28 @@ class Client::Impl final {
 };
 #endif
 
-void complete_external_query(int32 client_id, NetQueryPtr query) {
+void complete_external_query(int32 client_id, uint64 query_id, ExternalQueryResult result) {
 #if TD_THREAD_UNSUPPORTED || TD_EVENTFD_UNSUPPORTED
+  auto query = take_external_query(query_id);
+  if (query.empty()) {
+    return;
+  }
+  if (result.is_ok) {
+    query->set_ok(BufferSlice(Slice(result.ok_data.data(), result.ok_data.size())));
+  } else {
+    query->set_error(Status::Error(result.error_code, result.error_message));
+  }
   NetQueryDispatcher::complete_net_query(std::move(query));
 #else
-  // We may be called from outside TDLib's scheduler threads (e.g. Qt main
-  // thread), so we cannot use G() or send_closure_later directly.
-  // Use the MultiImpl's ConcurrentScheduler send guard to safely dispatch.
+  // Called from outside TDLib's scheduler threads (the embedder's network
+  // thread).  Only the id and plain result cross into TDLib via the send
+  // guard; the stashed NetQuery is taken and finished on the client's
+  // scheduler thread, so no actor is touched or migrated off-thread.
   auto impl = MultiImpl::get_client_impl(client_id);
   if (impl) {
-    impl->complete_query(client_id, std::move(query));
+    impl->complete_query(client_id, query_id, std::move(result));
   } else {
-    LOG(ERROR) << "No MultiImpl found for client " << client_id << ", dropping query";
+    LOG(ERROR) << "No MultiImpl found for client " << client_id << ", dropping query " << query_id;
   }
 #endif
 }
