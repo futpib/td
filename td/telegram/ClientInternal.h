@@ -39,4 +39,17 @@ struct ExternalQueryResult {
 // so no actor is ever touched or migrated off-thread.
 void complete_external_query(int32 client_id, uint64 query_id, ExternalQueryResult result);
 
+// Inject server-pushed updates that the embedder received on its own connection
+// into TDLib's update pipeline.  `updates_bytes` holds a serialized telegram_api
+// Updates constructor -- the same bytes a Session would read off the wire.  This
+// is the inbound counterpart to set_external_dispatch: external_dispatch forwards
+// TDLib's outgoing queries to the embedder, and this carries the server's pushed
+// updates back in.  Without it an external-dispatch client sends queries but
+// never sees pushes, so its update state freezes after the initial sync.
+//
+// Safe to call from any thread (e.g. the embedder's network thread): only plain
+// data crosses into TDLib; the bytes are parsed and delivered to UpdatesManager
+// on the client's scheduler thread, exactly like a native Session's inbound path.
+void push_external_updates(int32 client_id, std::string updates_bytes);
+
 }  // namespace td

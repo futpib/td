@@ -29,6 +29,7 @@
 #include "td/utils/Slice.h"
 #include "td/utils/SliceBuilder.h"
 #include "td/utils/StringBuilder.h"
+#include "td/utils/tl_parsers.h"
 #include "td/utils/utf8.h"
 
 #include <algorithm>
@@ -402,6 +403,29 @@ class MultiTd final : public Actor {
         .release();
   }
 
+  void push_updates(int32 td_id, std::string updates_bytes) {
+    // Inbound counterpart to external_dispatch: parse the embedder-supplied
+    // update bytes and feed them to the client's UpdatesManager, exactly as a
+    // native Session would after reading them off the wire.  No NetQuery and no
+    // actor ownership crosses here, so (unlike completion) there is nothing to
+    // migrate -- we just hand a plain telegram_api object to the Td actor.
+    auto it = tds_.find(td_id);
+    if (it == tds_.end() || it->second.empty()) {
+      return;
+    }
+    auto buffer = BufferSlice(Slice(updates_bytes.data(), updates_bytes.size()));
+    TlBufferParser parser(&buffer);
+    auto updates = telegram_api::Updates::fetch(parser);
+    parser.fetch_end();
+    if (parser.get_error()) {
+      LOG(ERROR) << "Failed to fetch externally-pushed update: " << parser.get_error();
+      return;
+    }
+    // auth_key_id 0: these updates arrive over the embedder's connection, not a
+    // TDLib-owned auth key; on_update_from_auth_key_id(0) is a no-op by design.
+    send_closure_later(it->second, &Td::on_update, std::move(updates), static_cast<uint64>(0));
+  }
+
  private:
   Td::Options options_;
   GlobalExternalDispatchCallback global_dispatch_;
@@ -544,6 +568,11 @@ class MultiImpl {
   void complete_query(int32 client_id, uint64 query_id, ExternalQueryResult result) {
     auto guard = concurrent_scheduler_->get_send_guard();
     send_closure(multi_td_, &MultiTd::complete_external, client_id, query_id, std::move(result));
+  }
+
+  void push_updates(int32 client_id, std::string updates_bytes) {
+    auto guard = concurrent_scheduler_->get_send_guard();
+    send_closure(multi_td_, &MultiTd::push_updates, client_id, std::move(updates_bytes));
   }
 
   static void register_client(int32 client_id, std::shared_ptr<MultiImpl> impl) {
@@ -833,6 +862,24 @@ void complete_external_query(int32 client_id, uint64 query_id, ExternalQueryResu
     impl->complete_query(client_id, query_id, std::move(result));
   } else {
     LOG(ERROR) << "No MultiImpl found for client " << client_id << ", dropping query " << query_id;
+  }
+#endif
+}
+
+void push_external_updates(int32 client_id, std::string updates_bytes) {
+#if TD_THREAD_UNSUPPORTED || TD_EVENTFD_UNSUPPORTED
+  // External-dispatch update injection targets the threaded desktop embedder;
+  // the single-threaded build has no dedicated network thread to push from.
+  LOG(ERROR) << "push_external_updates is not supported in single-threaded builds";
+#else
+  // Called from outside TDLib's scheduler threads (the embedder's network
+  // thread).  Only plain update bytes cross into TDLib via the send guard; they
+  // are parsed and handed to UpdatesManager on the client's scheduler thread.
+  auto impl = MultiImpl::get_client_impl(client_id);
+  if (impl) {
+    impl->push_updates(client_id, std::move(updates_bytes));
+  } else {
+    LOG(ERROR) << "No MultiImpl found for client " << client_id << ", dropping pushed updates";
   }
 #endif
 }
