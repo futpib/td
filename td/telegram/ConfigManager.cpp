@@ -1175,6 +1175,17 @@ void ConfigManager::save_config_expire(Timestamp timestamp) {
 void ConfigManager::process_config(tl_object_ptr<telegram_api::config> config) {
   bool is_from_main_dc = G()->net_query_dispatcher().get_main_dc_id().get_value() == config->this_dc_;
 
+  if (!is_from_main_dc && G()->net_query_dispatcher().use_external_dispatch()) {
+    // Under external dispatch every query rides the embedder's single
+    // connection, so the config always arrives from the embedder's main DC.
+    // TDLib never runs its own auth/migrate handshake here, so it never learns
+    // the real main DC and would otherwise busy-loop getConfig forever
+    // (reload_in == 0 on every "non-main" config).  Adopt this_dc as our main
+    // DC so is_from_main_dc holds and the config is applied normally.
+    G()->net_query_dispatcher().set_main_dc_id(config->this_dc_);
+    is_from_main_dc = true;
+  }
+
   LOG(INFO) << to_string(config);
   auto reload_in = clamp(config->expires_ - config->date_, 60, 86400);
   save_config_expire(Timestamp::in(reload_in));
