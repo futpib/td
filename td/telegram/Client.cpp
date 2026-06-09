@@ -29,6 +29,7 @@
 #include "td/utils/Slice.h"
 #include "td/utils/SliceBuilder.h"
 #include "td/utils/StringBuilder.h"
+#include "td/utils/Gzip.h"
 #include "td/utils/tl_parsers.h"
 #include "td/utils/utf8.h"
 
@@ -77,6 +78,18 @@ static ExternalQuery stash_external_query(NetQueryPtr query) {
   ExternalQuery data;
   data.query = query->query().as_slice().str();
   data.gzip = (query->gzip_flag() == NetQuery::GzipFlag::On);
+  if (data.gzip) {
+    // The embedder re-frames these queries onto tdesktop's own MTProto session.
+    // Its hand-rolled gzip_packed framing is mishandled by the server for
+    // cross-peer media sends (replies INPUT_FETCH_FAIL), while tdesktop's
+    // native uploader sends such queries uncompressed.  Decompress here and
+    // hand the bridge a raw, unpacked query so it matches the native path.
+    auto decompressed = gzdecode(query->query().as_slice());
+    if (!decompressed.empty()) {
+      data.query = decompressed.as_slice().str();
+      data.gzip = false;
+    }
+  }
   data.raw_dc_id = query->dc_id().is_main() ? 0 : query->dc_id().get_raw_id();
   data.type = static_cast<int32>(query->type());
   std::lock_guard<std::mutex> lock(external_queries_mutex_);
