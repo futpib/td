@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
-project(TDLib VERSION 1.8.66 LANGUAGES CXX C)
+project(TDLib VERSION 1.8.67 LANGUAGES CXX C)
 
 if (NOT DEFINED CMAKE_MODULE_PATH)
   set(CMAKE_MODULE_PATH "")
@@ -490,6 +490,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/GroupCallParticipantOrder.cpp
   td/telegram/GroupCallVideoPayload.cpp
   td/telegram/HashtagHints.cpp
+  td/telegram/InlineKeyboardButton.cpp
   td/telegram/InlineMessageManager.cpp
   td/telegram/InlineQueriesManager.cpp
   td/telegram/InputBusinessChatLink.cpp
@@ -501,6 +502,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/InputMessageText.cpp
   td/telegram/JoinChatBotResult.cpp
   td/telegram/JsonValue.cpp
+  td/telegram/KeyboardButton.cpp
   td/telegram/KeyboardButtonStyle.cpp
   td/telegram/LabeledPricePart.cpp
   td/telegram/LanguagePackManager.cpp
@@ -615,6 +617,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/RequestedDialogType.cpp
   td/telegram/Requests.cpp
   td/telegram/RestrictionReason.cpp
+  td/telegram/RichButtonStyle.cpp
   td/telegram/RichMessage.cpp
   td/telegram/RichMessageMedia.cpp
   td/telegram/SavedMessagesManager.cpp
@@ -715,6 +718,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/WebDomainException.cpp
   td/telegram/WebPageBlock.cpp
   td/telegram/WebPagesManager.cpp
+  td/telegram/WelcomeMessageManager.cpp
 
   td/telegram/AccentColorId.h
   td/telegram/AccessRights.h
@@ -835,6 +839,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/EmojiGroupType.h
   td/telegram/EmojiStatus.h
   td/telegram/EncryptedFile.h
+  td/telegram/EphemeralMessageFullId.h
   td/telegram/EphemeralMessageId.h
   td/telegram/FactCheck.h
   td/telegram/FileReferenceManager.h
@@ -890,6 +895,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/GroupCallParticipantOrder.h
   td/telegram/GroupCallVideoPayload.h
   td/telegram/HashtagHints.h
+  td/telegram/InlineKeyboardButton.h
   td/telegram/InlineMessageManager.h
   td/telegram/InlineQueriesManager.h
   td/telegram/InputBusinessChatLink.h
@@ -902,6 +908,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/InputMessageText.h
   td/telegram/JoinChatBotResult.h
   td/telegram/JsonValue.h
+  td/telegram/KeyboardButton.h
   td/telegram/KeyboardButtonStyle.h
   td/telegram/LabeledPricePart.h
   td/telegram/LanguagePackManager.h
@@ -916,6 +923,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/MessageContent.h
   td/telegram/MessageContentDupType.h
   td/telegram/MessageContentType.h
+  td/telegram/MessageContentUploadId.h
   td/telegram/MessageCopyOptions.h
   td/telegram/MessageCover.h
   td/telegram/MessageDb.h
@@ -1046,6 +1054,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/RequestedDialogType.h
   td/telegram/Requests.h
   td/telegram/RestrictionReason.h
+  td/telegram/RichButtonStyle.h
   td/telegram/RichMessage.h
   td/telegram/RichMessageMedia.h
   td/telegram/SavedMessagesManager.h
@@ -1162,6 +1171,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/WebPageBlock.h
   td/telegram/WebPageId.h
   td/telegram/WebPagesManager.h
+  td/telegram/WelcomeMessageManager.h
 
   td/telegram/AgeVerificationParameters.hpp
   td/telegram/AiComposeTone.hpp
@@ -1211,8 +1221,10 @@ set(TDLIB_SOURCE_PART2
   td/telegram/Game.hpp
   td/telegram/GiveawayParameters.hpp
   td/telegram/GroupCallMessageLimit.hpp
+  td/telegram/InlineKeyboardButton.hpp
   td/telegram/InputInvoice.hpp
   td/telegram/InputMessageText.hpp
+  td/telegram/KeyboardButton.hpp
   td/telegram/KeyboardButtonStyle.hpp
   td/telegram/MediaArea.hpp
   td/telegram/MediaAreaCoordinates.hpp
@@ -1248,6 +1260,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/RepliedMessageInfo.hpp
   td/telegram/ReplyMarkup.hpp
   td/telegram/RequestedDialogType.hpp
+  td/telegram/RichButtonStyle.hpp
   td/telegram/RichMessage.hpp
   td/telegram/RichMessageMedia.hpp
   td/telegram/ScopeNotificationSettings.hpp
