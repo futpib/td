@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
-project(TDLib VERSION 1.8.67 LANGUAGES CXX C)
+project(TDLib VERSION 1.8.68 LANGUAGES CXX C)
 
 if (NOT DEFINED CMAKE_MODULE_PATH)
   set(CMAKE_MODULE_PATH "")
@@ -693,6 +693,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/ToDoItem.cpp
   td/telegram/ToDoList.cpp
   td/telegram/TonAmount.cpp
+  td/telegram/TonWalletManager.cpp
   td/telegram/TopDialogCategory.cpp
   td/telegram/TopDialogManager.cpp
   td/telegram/TranscriptionInfo.cpp
@@ -896,6 +897,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/GroupCallVideoPayload.h
   td/telegram/HashtagHints.h
   td/telegram/InlineKeyboardButton.h
+  td/telegram/InlineMessageContent.h
   td/telegram/InlineMessageManager.h
   td/telegram/InlineQueriesManager.h
   td/telegram/InputBusinessChatLink.h
@@ -1143,6 +1145,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/ToDoItem.h
   td/telegram/ToDoList.h
   td/telegram/TonAmount.h
+  td/telegram/TonWalletManager.h
   td/telegram/TopDialogCategory.h
   td/telegram/TopDialogManager.h
   td/telegram/TranscriptionInfo.h
