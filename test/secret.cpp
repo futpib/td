@@ -84,6 +84,8 @@ class messages_getDhConfig {
 
 class InputUser {
  public:
+  virtual ~InputUser() = default;
+
   static tl_object_ptr<InputUser> fetch(TlBufferParser &p);
 };
 
@@ -92,12 +94,12 @@ class inputUser final : public InputUser {
   int64 user_id_{};
   int64 access_hash_{};
 
-  static const int32 ID = -668391402;
+  static const int32 ID = -233744186;
   inputUser() = default;
 
   explicit inputUser(TlBufferParser &p)
 #define FAIL(error) p.set_error(error)
-      : user_id_(TlFetchInt::parse(p))
+      : user_id_(TlFetchLong::parse(p))
       , access_hash_(TlFetchLong::parse(p))
 #undef FAIL
   {
@@ -275,7 +277,7 @@ class encryptedChat final {
       , key_fingerprint_(key_fingerprint) {
   }
 
-  static const int32 ID = -94974410;
+  static const int32 ID = 1643173063;
   int32 get_id() const {
     return ID;
   }
@@ -302,6 +304,43 @@ class encryptedChat final {
 };
 const int32 encryptedChat::ID;
 
+class encryptedChatWaiting final {
+ public:
+  int32 id_{};
+  int64 access_hash_{};
+  int32 date_{};
+  int64 admin_id_{};
+  int64 participant_id_{};
+
+  encryptedChatWaiting() = default;
+
+  encryptedChatWaiting(int32 id, int64 access_hash, int32 date, int64 admin_id, int64 participant_id)
+      : id_(id), access_hash_(access_hash), date_(date), admin_id_(admin_id), participant_id_(participant_id) {
+  }
+
+  static const int32 ID = 1722964307;
+  int32 get_id() const {
+    return ID;
+  }
+
+  void store(TlStorerCalcLength &s) const {
+    TlStoreBinary::store(id_, s);
+    TlStoreBinary::store(access_hash_, s);
+    TlStoreBinary::store(date_, s);
+    TlStoreBinary::store(admin_id_, s);
+    TlStoreBinary::store(participant_id_, s);
+  }
+
+  void store(TlStorerUnsafe &s) const {
+    TlStoreBinary::store(id_, s);
+    TlStoreBinary::store(access_hash_, s);
+    TlStoreBinary::store(date_, s);
+    TlStoreBinary::store(admin_id_, s);
+    TlStoreBinary::store(participant_id_, s);
+  }
+};
+const int32 encryptedChatWaiting::ID;
+
 class messages_sentEncryptedMessage final {
  public:
   int32 date_{};
@@ -324,6 +363,19 @@ class messages_sentEncryptedMessage final {
     TlStoreBinary::store(date_, s);
   }
 };
+
+// the classes above must be kept in sync with the scheme
+static_assert(messages_getDhConfig::ID == telegram_api::messages_getDhConfig::ID, "");
+static_assert(inputUser::ID == telegram_api::inputUser::ID, "");
+static_assert(messages_requestEncryption::ID == telegram_api::messages_requestEncryption::ID, "");
+static_assert(inputEncryptedChat::ID == telegram_api::inputEncryptedChat::ID, "");
+static_assert(messages_acceptEncryption::ID == telegram_api::messages_acceptEncryption::ID, "");
+static_assert(messages_sendEncryptedService::ID == telegram_api::messages_sendEncryptedService::ID, "");
+static_assert(messages_sendEncrypted::ID == telegram_api::messages_sendEncrypted::ID, "");
+static_assert(messages_dhConfig::ID == telegram_api::messages_dhConfig::ID, "");
+static_assert(encryptedChatWaiting::ID == telegram_api::encryptedChatWaiting::ID, "");
+static_assert(encryptedChat::ID == telegram_api::encryptedChat::ID, "");
+static_assert(messages_sentEncryptedMessage::ID == telegram_api::messages_sentEncryptedMessage::ID, "");
 
 }  // namespace my_api
 
@@ -773,10 +825,10 @@ class Master final : public Actor {
     LOG(INFO) << "SecretChatId = " << id;
   }
 
-  static bool can_fail(NetQueryPtr &query) {
-    static int cnt = 20;
-    if (cnt > 0) {
-      cnt--;
+  int32 reliable_query_cnt_ = 20;
+  bool can_fail(NetQueryPtr &query) {
+    if (reliable_query_cnt_ > 0) {
+      reliable_query_cnt_--;
       return false;
     }
     if (query->tl_constructor() == telegram_api::messages_sendEncrypted::ID ||
@@ -839,12 +891,17 @@ class Master final : public Actor {
   void process_net_query(my_api::messages_requestEncryption &&request_encryption, NetQueryPtr net_query,
                          ActorShared<NetQueryCallback> callback) {
     CHECK(get_link_token() == 1);
-    send_closure(alice_.get_actor_unsafe()->actor_, &SecretChatActor::update_chat,
-                 make_tl_object<telegram_api::encryptedChatWaiting>(123, 321, 0, 1, 2));
     send_closure(bob_.get_actor_unsafe()->actor_, &SecretChatActor::update_chat,
                  make_tl_object<telegram_api::encryptedChatRequested>(0, false, 123, 321, 0, 1, 2,
                                                                       request_encryption.g_a_.clone()));
-    net_query->clear();
+
+    my_api::encryptedChatWaiting encrypted_chat(123, 321, 0, 1, 2);
+    auto storer = TLObjectStorer<my_api::encryptedChatWaiting>(encrypted_chat);
+    BufferSlice answer(storer.size());
+    auto real_size = storer.store(answer.as_mutable_slice().ubegin());
+    CHECK(real_size == answer.size());
+    net_query->set_ok(std::move(answer));
+    send_closure(std::move(callback), &NetQueryCallback::on_result, std::move(net_query));
   }
   void process_net_query(my_api::messages_acceptEncryption &&request_encryption, NetQueryPtr net_query,
                          ActorShared<NetQueryCallback> callback) {
@@ -872,7 +929,7 @@ class Master final : public Actor {
   }
   void send_ping(int32 id, int cnt) {
     if (cnt % 200 == 0) {
-      LOG(ERROR) << "Send ping " << tag("id", id) << tag("cnt", cnt);
+      LOG(WARNING) << "Send ping " << tag("id", id) << tag("cnt", cnt);
     } else {
       LOG(INFO) << "Send ping " << tag("id", id) << tag("cnt", cnt);
     }
@@ -999,7 +1056,6 @@ void FakeSecretChatContext::on_read_message(int64, Promise<> promise) {
 }
 
 TEST(Secret, go) {
-  return;
   ConcurrentScheduler sched(0, 0);
 
   Status result;
