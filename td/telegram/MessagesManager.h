@@ -114,6 +114,7 @@
 
 namespace td {
 
+class AiComposeStyle;
 struct BinlogEvent;
 class BusinessBotManageBar;
 class ChatTheme;
@@ -214,8 +215,7 @@ class MessagesManager final : public Actor {
 
   void on_failed_dialog_messages_search(DialogId dialog_id, int64 random_id);
 
-  void on_get_dialog_message_count(DialogId dialog_id, MessageTopic message_topic, MessageSearchFilter filter,
-                                   int32 total_count, Promise<int32> &&promise);
+  void on_get_dialog_message_count(DialogId dialog_id, MessageSearchFilter filter, int32 total_count);
 
   void on_get_scheduled_server_messages(DialogId dialog_id, uint32 generation,
                                         vector<tl_object_ptr<telegram_api::Message>> &&messages, bool is_not_modified);
@@ -268,6 +268,8 @@ class MessagesManager final : public Actor {
   void on_update_dialog_draft_message(DialogId dialog_id, MessageId top_thread_message_id,
                                       telegram_api::object_ptr<telegram_api::DraftMessage> &&draft_message,
                                       int32 try_count = 0);
+
+  void on_update_dialog_ai_compose_style(DialogId dialog_id, unique_ptr<AiComposeStyle> &&ai_compose_style);
 
   void on_update_dialog_is_pinned(FolderId folder_id, DialogId dialog_id, bool is_pinned);
 
@@ -830,8 +832,7 @@ class MessagesManager final : public Actor {
       telegram_api::object_ptr<telegram_api::messages_searchResultsPositions> positions,
       Promise<td_api::object_ptr<td_api::messagePositions>> &&promise);
 
-  void get_dialog_message_count(DialogId dialog_id, const td_api::object_ptr<td_api::MessageTopic> &topic_id,
-                                MessageSearchFilter filter, bool return_local, Promise<int32> &&promise);
+  int32 get_dialog_message_count_local(DialogId dialog_id, MessageSearchFilter filter) const;
 
   void get_dialog_message_position(MessageFullId message_full_id, MessageSearchFilter filter,
                                    const td_api::object_ptr<td_api::MessageTopic> &topic_id, Promise<int32> &&promise);
@@ -1355,6 +1356,7 @@ class MessagesManager final : public Actor {
     uint32 available_reactions_generation = 0;
     MessageTtl message_ttl;
     unique_ptr<DraftMessage> draft_message;
+    unique_ptr<AiComposeStyle> ai_compose_style;
     unique_ptr<DialogActionBar> action_bar;
     unique_ptr<BusinessBotManageBar> business_bot_manage_bar;
     LogEventIdWithGeneration save_draft_message_log_event_id;
@@ -1770,12 +1772,6 @@ class MessagesManager final : public Actor {
 
   static std::pair<DialogId, unique_ptr<Message>> create_message(Td *td, MessageInfo &&message_info,
                                                                  bool is_guest_message, const char *source);
-
-  void get_topic_unread_message_count(DialogId dialog_id, const MessageTopic &message_topic, MessageSearchFilter filter,
-                                      Promise<int32> &&promise);
-
-  void get_dialog_message_count_from_server(DialogId dialog_id, MessageTopic message_topic, MessageSearchFilter filter,
-                                            Promise<int32> &&promise);
 
   MessageFullId on_get_message(MessageInfo &&message_info, const bool from_update, const char *source);
 
@@ -2515,6 +2511,8 @@ class MessagesManager final : public Actor {
 
   void send_update_chat_draft_message(Dialog *d);
 
+  void send_update_chat_text_composition_parameters(const Dialog *d);
+
   void send_update_last_message_if_needed(const Dialog *d, const Message *m, const char *source) const;
 
   void send_update_chat_last_message(Dialog *d, const char *source);
@@ -3064,6 +3062,13 @@ class MessagesManager final : public Actor {
   bool update_dialog_draft_message(Dialog *d, unique_ptr<DraftMessage> &&draft_message, bool from_update,
                                    bool need_update_dialog_pos, bool need_delete_files, bool from_database);
 
+  void set_dialog_ai_compose_style(Dialog *d, unique_ptr<AiComposeStyle> &&ai_compose_style);
+
+  void on_get_ai_compose_style_tone_name(DialogId dialog_id, uint64 generation,
+                                         unique_ptr<AiComposeStyle> &&ai_compose_style, Result<string> r_tone_name);
+
+  void do_set_dialog_ai_compose_style(Dialog *d, unique_ptr<AiComposeStyle> &&ai_compose_style);
+
   void clear_dialog_draft_by_sent_message(Dialog *d, const Message *m, bool need_update_dialog_pos);
 
   void save_dialog_draft_message_on_server(DialogId dialog_id);
@@ -3424,6 +3429,9 @@ class MessagesManager final : public Actor {
   FlatHashMap<NotificationGroupId, DialogId, NotificationGroupIdHash> notification_group_id_to_dialog_id_;
 
   uint64 current_message_edit_generation_ = 0;
+
+  FlatHashMap<DialogId, uint64, DialogIdHash> pending_dialog_ai_compose_style_generations_;
+  uint64 current_ai_compose_style_generation_ = 0;
 
   std::unordered_set<DialogListId, DialogListIdHash> postponed_unread_message_count_updates_;
   std::unordered_set<DialogListId, DialogListIdHash> postponed_unread_chat_count_updates_;

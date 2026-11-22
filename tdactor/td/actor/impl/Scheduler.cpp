@@ -12,6 +12,7 @@
 #include "td/actor/impl/Event.h"
 #include "td/actor/impl/EventFull.h"
 
+#include "td/utils/Action.h"
 #include "td/utils/algorithm.h"
 #include "td/utils/common.h"
 #include "td/utils/ExitGuard.h"
@@ -242,13 +243,34 @@ void Scheduler::clear() {
   if (!service_actor_.empty()) {
     service_actor_.do_stop();
   }
-  while (!pending_actors_.empty()) {
-    auto actor_info = ActorInfo::from_list_node(pending_actors_.get());
-    do_stop_actor(actor_info);
+  if (inbound_queue_) {
+    while (true) {
+      int ready_n = inbound_queue_->reader_wait_nonblock();
+      if (ready_n == 0) {
+        break;
+      }
+      while (ready_n-- > 0) {
+        EventFull event = inbound_queue_->reader_get_unsafe();
+        if (event.actor_id().empty()) {
+          if (!event.data().empty()) {
+            register_migrated_actor(static_cast<ActorInfo *>(event.data().data.ptr));
+          }
+        } else {
+          finish_migrate(event.data());
+        }
+      }
+      inbound_queue_->reader_flush();
+    }
   }
-  while (!ready_actors_.empty()) {
-    auto actor_info = ActorInfo::from_list_node(ready_actors_.get());
-    do_stop_actor(actor_info);
+  while (!pending_actors_.empty() || !ready_actors_.empty()) {
+    while (!pending_actors_.empty()) {
+      auto actor_info = ActorInfo::from_list_node(pending_actors_.get());
+      do_stop_actor(actor_info);
+    }
+    while (!ready_actors_.empty()) {
+      auto actor_info = ActorInfo::from_list_node(ready_actors_.get());
+      do_stop_actor(actor_info);
+    }
   }
   poll_.clear();
 
